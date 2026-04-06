@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Taxi Client | Powered by ThisTeam</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    <style>
+        :root {
+            --bg: #0b0e16;
+            --glass: rgba(255, 255, 255, 0.07);
+            --accent: #5856d6;
+            --text-main: #ffffff;
+            --text-dim: #8e8e93;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .app-container {
+            width: 100%;
+            max-width: 400px;
+            background: linear-gradient(180deg, #1c1c2e 0%, #0b0e16 100%);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Имитация карты */
+        .map-bg {
+            flex-grow: 1;
+            background: url('https://i.imgur.com/8mQWpYv.png') center/cover; /* Замени на реальную карту если нужно */
+            position: relative;
+            filter: grayscale(0.5) brightness(0.7);
+        }
+
+        .user-marker {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            background: var(--accent);
+            border: 4px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 20px var(--accent);
+        }
+
+        /* Панель заказа */
+        .order-panel {
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255,255,255,0.1);
+            border-radius: 30px 30px 0 0;
+            padding: 25px;
+            padding-bottom: 40px;
+        }
+
+        .balance-badge {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+            border: 1px solid var(--accent);
+        }
+
+        .input-group {
+            background: rgba(0,0,0,0.3);
+            border-radius: 15px;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+
+        input {
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: white;
+            padding: 10px;
+            font-size: 16px;
+            outline: none;
+        }
+
+        .tariffs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+        }
+
+        .tariff-card {
+            flex: 1;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 15px 10px;
+            border-radius: 15px;
+            text-align: center;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        .tariff-card.active {
+            border-color: var(--accent);
+            background: rgba(88, 86, 214, 0.2);
+        }
+
+        .tariff-card span { display: block; font-size: 12px; color: var(--text-dim); margin-top: 5px; }
+
+        .btn-order {
+            width: 100%;
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 18px;
+            border-radius: 18px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 10px 20px rgba(88, 86, 214, 0.3);
+        }
+
+        /* Экран поиска */
+        .searching-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(11, 14, 22, 0.9);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            display: none;
+        }
+
+        .radar {
+            width: 150px;
+            height: 150px;
+            border: 2px solid var(--accent);
+            border-radius: 50%;
+            position: relative;
+            animation: pulse 2s infinite;
+            margin-bottom: 30px;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(0.8); opacity: 0.5; }
+        }
+
+        .ride-info {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .price-counter {
+            font-size: 32px;
+            font-weight: 900;
+            color: #4cd964;
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <div class="balance-badge">💸 <span id="balance">0</span>₽</div>
+    
+    <div class="map-bg">
+        <div class="user-marker"></div>
+    </div>
+
+    <div id="searchingScreen" class="searching-overlay">
+        <div class="radar"></div>
+        <h2 id="statusText">Поиск водителя...</h2>
+        <div id="activeRide" class="ride-info" style="display: none;">
+            <div>Идет списание (10₽ / 10 сек)</div>
+            <div class="price-counter" id="totalSpent">0₽</div>
+            <button onclick="cancelOrder()" style="background:none; border:1px solid #ff3b30; color:#ff3b30; margin-top:20px; padding:10px 20px; border-radius:10px; cursor:pointer;">Завершить</button>
+        </div>
+    </div>
+
+    <div class="order-panel" id="mainPanel">
+        <div class="input-group">
+            <input type="text" placeholder="Куда едем?" id="destination">
+        </div>
+
+        <div class="tariffs">
+            <div class="tariff-card active" onclick="selectTariff(this, 10)">
+                Эконом
+                <span>10₽ / 10с</span>
+            </div>
+            <div class="tariff-card" onclick="selectTariff(this, 25)">
+                Комфорт
+                <span>25₽ / 10с</span>
+            </div>
+        </div>
+
+        <button class="btn-order" onclick="startOrder()">Заказать такси</button>
+    </div>
+</div>
+
+<script>
+    // Инициализация Firebase (твои данные)
+    const firebaseConfig = {
+        apiKey: "AIzaSyD6vEmfgTR1q0zpYh0b9hDL0B2t81b-1vM",
+        authDomain: "clutchdq.firebaseapp.com",
+        databaseURL: "https://clutchdq-default-rtdb.firebaseio.com",
+        projectId: "clutchdq",
+        storageBucket: "clutchdq.firebasestorage.app",
+        messagingSenderId: "329422689964",
+        appId: "1:329422689964:web:3c388e906d2d46e84bb109"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    
+    // Твой ID (для теста фиксированный)
+    const userId = "user_1"; 
+    let currentRate = 10;
+    let rideInterval = null;
+
+    // Следим за балансом и статусом
+    db.ref('users/' + userId).on('value', (snapshot) => {
+        const user = snapshot.val();
+        if (user) {
+            document.getElementById('balance').innerText = user.balance || 0;
+            
+            if (user.status === 'searching') {
+                showOverlay('Поиск водителя...');
+            } else if (user.status === 'active') {
+                showOverlay('Поездка началась!');
+                document.getElementById('activeRide').style.display = 'block';
+                startBilling();
+            } else {
+                hideOverlay();
+            }
+        }
+    });
+
+    function selectTariff(el, rate) {
+        document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('active'));
+        el.classList.add('active');
+        currentRate = rate;
+    }
+
+    function startOrder() {
+        const dest = document.getElementById('destination').value;
+        if (!dest) return alert("Введите адрес!");
+        
+        db.ref('users/' + userId).update({
+            status: 'searching',
+            destination: dest,
+            rate: currentRate
+        });
+    }
+
+    function cancelOrder() {
+        db.ref('users/' + userId).update({ status: 'idle' });
+        stopBilling();
+    }
+
+    function showOverlay(text) {
+        document.getElementById('searchingScreen').style.display = 'flex';
+        document.getElementById('statusText').innerText = text;
+    }
+
+    function hideOverlay() {
+        document.getElementById('searchingScreen').style.display = 'none';
+        document.getElementById('activeRide').style.display = 'none';
+        stopBilling();
+    }
+
+    function startBilling() {
+        if (rideInterval) return;
+        rideInterval = setInterval(() => {
+            db.ref('users/' + userId).transaction((user) => {
+                if (user && user.balance >= user.rate) {
+                    user.balance -= user.rate;
+                    return user;
+                } else {
+                    if (user) user.status = 'idle';
+                    return user;
+                }
+            });
+        }, 10000);
+    }
+
+    function stopBilling() {
+        clearInterval(rideInterval);
+        rideInterval = null;
+    }
+</script>
+
+</body>
+</html>
